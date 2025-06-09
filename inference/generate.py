@@ -49,13 +49,16 @@ def generate(
         List[List[int]]: A list of lists containing the generated tokens for each sequence.
     """
     prompt_lens = [len(t) for t in prompt_tokens]
-    assert max(prompt_lens) <= model.max_seq_len, f"Prompt length exceeds model maximum sequence length (max_seq_len={model.max_seq_len})"
-    total_len = min(model.max_seq_len, max_new_tokens + max(prompt_lens))
+    max_prompt_len = max(prompt_lens)
+    assert max_prompt_len <= model.max_seq_len, (
+        f"Prompt length exceeds model maximum sequence length (max_seq_len={model.max_seq_len})"
+    )
+    total_len = min(model.max_seq_len, max_new_tokens + max_prompt_len)
     tokens = torch.full((len(prompt_tokens), total_len), -1, dtype=torch.long, device="cuda")
     for i, t in enumerate(prompt_tokens):
         tokens[i, :len(t)] = torch.tensor(t, dtype=torch.long, device="cuda")
     prev_pos = 0
-    finished = torch.tensor([False] * len(prompt_tokens), device="cuda")
+    finished = torch.zeros(len(prompt_tokens), dtype=torch.bool, device="cuda")
     prompt_mask = tokens != -1
     for cur_pos in range(min(prompt_lens), total_len):
         logits = model.forward(tokens[:, prev_pos:cur_pos], prev_pos)
@@ -71,9 +74,9 @@ def generate(
             break
     completion_tokens = []
     for i, toks in enumerate(tokens.tolist()):
-        toks = toks[prompt_lens[i]:prompt_lens[i]+max_new_tokens]
+        toks = toks[prompt_lens[i] : prompt_lens[i] + max_new_tokens]
         if eos_id in toks:
-            toks = toks[:toks.index(eos_id)]
+            toks = toks[: toks.index(eos_id)]
         completion_tokens.append(toks)
     return completion_tokens
 
@@ -115,7 +118,8 @@ def main(
     with torch.device("cuda"):
         model = Transformer(args)
     tokenizer = AutoTokenizer.from_pretrained(ckpt_path)
-    tokenizer.decode(generate(model, [tokenizer.encode("DeepSeek")], 2, -1, 1.)[0])
+    # warm up the model to allocate necessary buffers
+    generate(model, [tokenizer.encode("DeepSeek")], 2, -1, 1.)
     load_model(model, os.path.join(ckpt_path, f"model{rank}-mp{world_size}.safetensors"))
 
     if interactive:
@@ -137,7 +141,9 @@ def main(
                 messages.clear()
                 continue
             messages.append({"role": "user", "content": prompt})
-            prompt_tokens = tokenizer.apply_chat_template(messages, add_generation_prompt=True)
+            prompt_tokens = tokenizer.apply_chat_template(
+                messages, add_generation_prompt=True, tokenize=True
+            )
             completion_tokens = generate(model, [prompt_tokens], max_new_tokens, tokenizer.eos_token_id, temperature)
             completion = tokenizer.decode(completion_tokens[0], skip_special_tokens=True)
             print(completion)
@@ -146,7 +152,14 @@ def main(
         with open(input_file) as f:
             prompts = [line.strip() for line in f.readlines()]
         assert len(prompts) <= args.max_batch_size, f"Number of prompts exceeds maximum batch size ({args.max_batch_size})"
-        prompt_tokens = [tokenizer.apply_chat_template([{"role": "user", "content": prompt}], add_generation_prompt=True) for prompt in prompts]
+        prompt_tokens = [
+            tokenizer.apply_chat_template(
+                [{"role": "user", "content": prompt}],
+                add_generation_prompt=True,
+                tokenize=True,
+            )
+            for prompt in prompts
+        ]
         completion_tokens = generate(model, prompt_tokens, max_new_tokens, tokenizer.eos_token_id, temperature)
         completions = tokenizer.batch_decode(completion_tokens, skip_special_tokens=True)
         for prompt, completion in zip(prompts, completions):
