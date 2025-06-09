@@ -140,11 +140,64 @@ def main(
             elif prompt == "/clear":
                 messages.clear()
                 continue
+            elif prompt.startswith("/save"):
+                _, _, filename = prompt.partition(" ")
+                if not filename:
+                    print("Usage: /save <filename>")
+                    continue
+                with open(filename, "w") as f:
+                    json.dump(messages, f, ensure_ascii=False, indent=2)
+                print(f"Chat history saved to {filename}")
+                continue
+            elif prompt.startswith("/load"):
+                _, _, filename = prompt.partition(" ")
+                if not filename:
+                    print("Usage: /load <filename>")
+                    continue
+                try:
+                    with open(filename) as f:
+                        lines = [ln.strip() for ln in f if ln.strip()]
+                except Exception as e:
+                    print(f"Failed to load {filename}: {e}")
+                    continue
+                for line in lines:
+                    messages.append({"role": "user", "content": line})
+                    prompt_tokens = tokenizer.apply_chat_template(
+                        messages, add_generation_prompt=True, tokenize=True
+                    )
+                    completion_tokens = generate(
+                        model, [prompt_tokens], max_new_tokens, tokenizer.eos_token_id, temperature
+                    )
+                    completion = tokenizer.decode(
+                        completion_tokens[0], skip_special_tokens=True
+                    )
+                    print(completion)
+                    messages.append({"role": "assistant", "content": completion})
+                continue
+            elif prompt.startswith("/temperature"):
+                try:
+                    temperature = float(prompt.split(maxsplit=1)[1])
+                    print(f"Temperature set to {temperature}")
+                except Exception:
+                    print("Usage: /temperature <value>")
+                continue
+            elif prompt.startswith("/max_new_tokens"):
+                try:
+                    max_new_tokens = int(prompt.split(maxsplit=1)[1])
+                    print(f"max_new_tokens set to {max_new_tokens}")
+                except Exception:
+                    print("Usage: /max_new_tokens <value>")
+                continue
+            elif prompt.startswith("/"):
+                print("Unknown command")
+                continue
             messages.append({"role": "user", "content": prompt})
             prompt_tokens = tokenizer.apply_chat_template(
                 messages, add_generation_prompt=True, tokenize=True
             )
-            completion_tokens = generate(model, [prompt_tokens], max_new_tokens, tokenizer.eos_token_id, temperature)
+            completion_tokens = generate(
+                model, [prompt_tokens], max_new_tokens, tokenizer.eos_token_id, temperature
+            )
             completion = tokenizer.decode(completion_tokens[0], skip_special_tokens=True)
             print(completion)
             messages.append({"role": "assistant", "content": completion})
