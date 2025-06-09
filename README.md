@@ -296,6 +296,15 @@ Then you can chat with DeepSeek-V3:
 torchrun --nnodes 2 --nproc-per-node 8 --node-rank $RANK --master-addr $ADDR generate.py --ckpt-path /path/to/DeepSeek-V3-Demo --config configs/config_671B.json --interactive --temperature 0.7 --max-new-tokens 200
 ```
 
+While chatting you can use the following commands:
+
+* `/exit` - quit the session
+* `/clear` - clear the conversation history
+* `/save <file>` - write the current chat history to a file
+* `/load <file>` - load prompts from a file and run them sequentially
+* `/temperature <value>` - adjust the sampling temperature
+* `/max_new_tokens <value>` - change the generation length
+
 Or batch inference on a given file:
 
 ```shell
